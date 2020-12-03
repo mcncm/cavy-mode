@@ -20,10 +20,47 @@
 
 ;;; Code:
 
+(defcustom cavy-compile-target 'qasm
+  "What should be the output of the Cavy compiler?"
+  :type 'symbol
+  :group 'cavy
+  :safe #'symbolp)
+
+(defcustom cavy-preview-buffer "cavy-preview"
+  "Name of the buffer to write Cavy compile output to."
+  :type 'string
+  :group 'cavy
+  :safe #'stringp)
+
+(defcustom cavy-binary "cavy"
+  "Name of the Cavy binary to call."
+  :type 'string
+  :group 'cavy
+  :safe #'stringp)
+
+(defun cavy-compile-command ()
+  "Determine the compilation command to run."
+  (cond ((eq 'qasm cavy-compile-target)
+         `(,cavy-binary "/dev/stdin" "-o" "/dev/stdout"))
+        (t '("false"))))
+
+(defun cavy-compile-process (buffer)
+  "Make a Cavy compilation process in buffer BUFFER."
+  (make-process :name "cavy" :buffer buffer :command cavy-compile-command))
+
+(defun cavy-compile-program (buffer)
+  "Compile a program and return the object code.
+The BUFFER argument is the buffer to write output to."
+  (let ((process (cavy-compile-process buffer)))
+  (process-send-string process (buffer-string))
+  (process-send-eof process)
+  (accept-process-output process))
+)
+
 (defun cavy-after-save-hook ()
   "Test function."
-  (with-output-to-temp-buffer "cavy-preview"
-    (print "You're writing Cavy, aren't you?")))
+  (with-output-to-temp-buffer cavy-preview-buffer
+    (cavy-compile-program cavy-preview-buffer)))
 
 ;;;###autoload
 (define-derived-mode cavy-mode fundamental-mode "Cavy"
