@@ -38,11 +38,33 @@
   :group 'cavy
   :safe #'stringp)
 
+(defvar cavy-qasm-compile-command
+  `(,cavy-binary "/dev/stdin" "-o" "/dev/stdout")
+  "Command to run when compiling to qasm.")
+
+(defvar cavy-latex-compile-command
+  (let* ((python-program
+          (string-join
+           '("import sys"
+           "from pycavy import Program"
+           "src = sys.stdin.read()"
+           "Program(src).compile().to_diagram().to_pdf(\'$DIR/cavy\')")
+           "; "))
+        (shell-script
+         (concat "DIR=`mktemp -d`; "
+                 "python -c " (concat "\"" python-program "\"") "; "
+                 "cat $DIR/cavy.pdf")
+          ))
+    `("bash" "-c" ,shell-script))
+  "Command to run when compiling to latex.")
+
 (defun cavy-compile-command ()
   "Determine the compilation command to run."
   (cond ((eq 'qasm cavy-compile-target)
-         `(,cavy-binary "/dev/stdin" "-o" "/dev/stdout"))
-        (t '("false"))))
+         cavy-qasm-compile-command)
+        ((eq 'latex cavy-compile-target)
+         cavy-latex-compile-command)
+        (t'("false"))))
 
 (defun cavy-compile-process (buffer)
   "Make a Cavy compilation process in buffer BUFFER."
