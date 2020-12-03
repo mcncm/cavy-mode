@@ -64,7 +64,21 @@
          cavy-qasm-compile-command)
         ((eq 'latex cavy-compile-target)
          cavy-latex-compile-command)
-        (t'("false"))))
+        (t '("false"))))
+
+(defun cavy-compile-buffer-setup (buffer)
+  "Command to ready BUFFER before receiving compilation output."
+  (cond ((eq 'latex cavy-compile-target)
+          (cavy-compile-buffer-setup-latex buffer))))
+
+(defun cavy-compile-buffer-setup-latex (buffer)
+  "Prepare a BUFFER to view PDFs."
+  (with-current-buffer (get-buffer buffer)
+    (progn
+      ;; Default encoding is UTF-8, which doesn't accept some bytes in the PDF
+      ;; headers.
+      (set-buffer-file-coding-system 'raw-text)
+      (pdf-view-mode))))
 
 (defun cavy-compile-process (buffer)
   "Make a Cavy compilation process in buffer BUFFER."
@@ -74,10 +88,10 @@
   "Compile a program and return the object code.
 The BUFFER argument is the buffer to write output to."
   (let ((process (cavy-compile-process buffer)))
-  (process-send-string process (buffer-string))
-  (process-send-eof process)
-  (accept-process-output process))
-)
+    (process-send-string process (buffer-string))
+    (process-send-eof process)
+    (accept-process-output process))
+  (cavy-compile-buffer-setup buffer))
 
 (defun cavy-after-save-hook ()
   "Test function."
