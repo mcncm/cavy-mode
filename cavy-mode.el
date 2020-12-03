@@ -46,7 +46,7 @@
 
 (defun cavy-compile-process (buffer)
   "Make a Cavy compilation process in buffer BUFFER."
-  (make-process :name "cavy" :buffer buffer :command cavy-compile-command))
+  (make-process :name "cavy" :buffer buffer :command (cavy-compile-command)))
 
 (defun cavy-compile-program (buffer)
   "Compile a program and return the object code.
@@ -62,10 +62,31 @@ The BUFFER argument is the buffer to write output to."
   (with-output-to-temp-buffer cavy-preview-buffer
     (cavy-compile-program cavy-preview-buffer)))
 
+(defconst cavy-keywords
+  '("if" "else" "for"
+    "let" "fn" "print"
+    "true" "false"
+    )
+  "Cavy keywords for font-locking.")
+
+(defvar cavy-font-lock-keywords
+  `(
+    (,(regexp-opt cavy-keywords 'symbols) . font-lock-keyword-face)
+    )
+  "Font-lock definitions.")
+
+(defvar cavy-syntactic-face-function
+  (lambda (state)
+    (if (nth 3 state) font-lock-string-face font-lock-comment-face)))
+
 ;;;###autoload
 (define-derived-mode cavy-mode fundamental-mode "Cavy"
   "Major mode for editing Cavylang code."
 
+  ;; Fontification
+  (setq-local font-lock-defaults '((cavy-font-lock-keywords)))
+
+  ;; Preview compiled code
   (add-hook 'after-save-hook 'cavy-after-save-hook nil t))
 
 (provide 'cavy-mode)
