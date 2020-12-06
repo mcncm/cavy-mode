@@ -20,8 +20,18 @@
 
 ;;; Code:
 
+;;;;;;;;;;;;;;;;;
+;; Compilation ;;
+;;;;;;;;;;;;;;;;;
+
 (defcustom cavy-compile-target 'qasm
   "What should be the output of the Cavy compiler?"
+  :type 'symbol
+  :group 'cavy
+  :safe #'symbolp)
+
+(defcustom cavy-latex-compile-method 'native
+  "What LaTeX backend should be used?"
   :type 'symbol
   :group 'cavy
   :safe #'symbolp)
@@ -42,7 +52,27 @@
   `(,cavy-binary "/dev/stdin" "-o" "/dev/stdout")
   "Command to run when compiling to qasm.")
 
-(defvar cavy-latex-compile-command
+(defun cavy-native-latex-compile-command ()
+  "Command to run when compiling to latex."
+  (let* ((out-dir "DIR")
+         (tex-doc "cavy.tex")
+         (pdf-doc "cavy.pdf")
+         (shell-script
+          (concat out-dir "=`mktemp -d`; "
+                  ;; No latex file polution, please!
+                  "cd $" out-dir "; "
+                  ;; Now make the .tex document
+                  cavy-binary
+                  " /dev/stdin -o " tex-doc " --target latex; "
+                  ;; And compile it! Note that latexmk is very noisy, and we
+                  ;; have to supress all its output in order for us to get a
+                  ;; well-formed pdf out of this.
+                  "latexmk " tex-doc " -pdf > /dev/null 2>&1; "
+                  "cat " pdf-doc)))
+  `("bash" "-c" ,shell-script)))
+
+(defun cavy-pycavy-latex-compile-command ()
+  "Command to run when compiling to latex, using pycavy as an intermediary."
   (let* ((python-program
           (string-join
            '("import sys"
@@ -55,15 +85,18 @@
                  "python -c " (concat "\"" python-program "\"") "; "
                  "cat $DIR/cavy.pdf")
           ))
-    `("bash" "-c" ,shell-script))
-  "Command to run when compiling to latex.")
+    `("bash" "-c" ,shell-script)))
 
 (defun cavy-compile-command ()
   "Determine the compilation command to run."
   (cond ((eq 'qasm cavy-compile-target)
          cavy-qasm-compile-command)
         ((eq 'latex cavy-compile-target)
-         cavy-latex-compile-command)
+         (cond ((eq 'pycavy cavy-latex-compile-method)
+                (cavy-pycavy-latex-compile-command))
+               ((eq 'native cavy-latex-compile-method)
+                (cavy-native-latex-compile-command))
+               (t '("false"))))
         (t '("false"))))
 
 (defun cavy-compile-buffer-setup (buffer)
@@ -98,11 +131,24 @@ The BUFFER argument is the buffer to write output to."
   (with-output-to-temp-buffer cavy-preview-buffer
     (cavy-compile-program cavy-preview-buffer)))
 
+;;;;;;;;;;;;
+;; Syntax ;;
+;;;;;;;;;;;;
+
+;; `define-derived-mode' will find this name automatically and use this table.
+(defvar cavy-mode-syntax-table nil
+  "Syntax table for `cavy-mode'.")
+
+(setq cavy-mode-syntax-table
+      (let ((syn-table (make-syntax-table)))
+        (modify-syntax-entry ?\/ ". 12b" syn-table)
+        (modify-syntax-entry ?\n "> b" syn-table)
+        syn-table))
+
 (defconst cavy-keywords
   '("if" "else" "for"
     "let" "fn" "print"
-    "true" "false"
-    )
+    "true" "false")
   "Cavy keywords for font-locking.")
 
 (defvar cavy-font-lock-keywords
@@ -111,9 +157,13 @@ The BUFFER argument is the buffer to write output to."
     )
   "Font-lock definitions.")
 
-(defvar cavy-syntactic-face-function
-  (lambda (state)
-    (if (nth 3 state) font-lock-string-face font-lock-comment-face)))
+; (defvar cavy-syntactic-face-function
+;   (lambda (state)
+;     (if (nth 3 state) font-lock-string-face font-lock-comment-face)))
+
+;;;;;;;;;;;;;;;;;;;;;
+;; Mode definition ;;
+;;;;;;;;;;;;;;;;;;;;;
 
 ;;;###autoload
 (define-derived-mode cavy-mode fundamental-mode "Cavy"
