@@ -48,9 +48,61 @@
   :group 'cavy
   :safe #'stringp)
 
-(defun cavy-qasm-compile-command ()
-  "Command to run when compiling to qasm."
-  `(,cavy-binary "/dev/stdin" "-o" "/dev/stdout"))
+(defcustom cavy-opt-level 0
+  "Optimization level for cavy compiler."
+  :type 'integer
+  :group 'cavy
+  :safe #'integerp)
+
+(defcustom cavy-comptime 't
+  "Do constant propagation optimization."
+  :type 'boolean
+  :group 'cavy
+  :safe #'booleanp)
+
+(defcustom cavy-phase 'nil
+  "Compilation phase to stop at. if NIL, proceed to code generation."
+  :group 'cavy)
+
+(defcustom cavy-debug 't
+  "Run compiler in debug mode if not NIL."
+  :type 'boolean
+  :group 'cavy
+  :safe #'booleanp)
+
+(defcustom cavy-target 'nil
+  "Compile target for Cavy code."
+  :type 'string
+  :group 'cavy
+  :safe #'stringp)
+
+(defcustom cavy-options '()
+  "Options passed to the Cavy binary."
+  :type 'list
+  :group 'cavy
+  :safe #'listp)
+
+(defun cavy-compile-command ()
+  "Genearte the Cavy compilation command."
+  (let ((target (if cavy-target
+                    `("--target" ,cavy-target)
+                  'nil))
+        (phase (if cavy-phase
+                   `("--phase" ,cavy-phase)
+                 'nil))
+        (opt (if cavy-opt-level
+                 `("-O" ,(number-to-string cavy-opt-level))
+               'nil))
+        (comptime (if cavy-comptime
+                      'nil
+                    '("--no-comptime")))
+        (dbg (if cavy-debug
+                 '("--debug")
+               'nil))
+        (in "/dev/stdin")
+        (out "/dev/stdout")
+        )
+    `(,cavy-binary ,in "-o" ,out ,@opt ,@target ,@comptime ,@phase ,@dbg)))
 
 (defun cavy-native-latex-compile-command ()
   "Command to run when compiling to latex."
@@ -63,47 +115,19 @@
                   "cd $" out-dir "; "
                   ;; Now make the .tex document
                   cavy-binary
-                  " /dev/stdin -o " tex-doc " --target latex; "
+                  " /dev/stdin -o " tex-doc " --typecheck --target latex --debug; "
                   ;; And compile it! Note that latexmk is very noisy, and we
                   ;; have to supress all its output in order for us to get a
                   ;; well-formed pdf out of this.
                   "latexmk " tex-doc " -pdf > /dev/null 2>&1; "
                   ;; Emit the pdf, but supress error message if it's not there.
                   "cat " pdf-doc " 2> /dev/null")))
-  `("bash" "-c" ,shell-script)))
-
-(defun cavy-pycavy-latex-compile-command ()
-  "Command to run when compiling to latex, using pycavy as an intermediary."
-  (let* ((python-program
-          (string-join
-           '("import sys"
-           "from pycavy import Program"
-           "src = sys.stdin.read()"
-           "Program(src).compile().to_diagram().to_pdf(\'$DIR/cavy\')")
-           "; "))
-        (shell-script
-         (concat "DIR=`mktemp -d`; "
-                 "python -c " (concat "\"" python-program "\"") "; "
-                 "cat $DIR/cavy.pdf")
-          ))
     `("bash" "-c" ,shell-script)))
-
-(defun cavy-compile-command ()
-  "Determine the compilation command to run."
-  (cond ((eq 'qasm cavy-compile-target)
-         (cavy-qasm-compile-command))
-        ((eq 'latex cavy-compile-target)
-         (cond ((eq 'pycavy cavy-latex-compile-method)
-                (cavy-pycavy-latex-compile-command))
-               ((eq 'native cavy-latex-compile-method)
-                (cavy-native-latex-compile-command))
-               (t '("false"))))
-        (t '("false"))))
 
 (defun cavy-compile-buffer-setup (process buffer)
   "Command to ready BUFFER used by PROCESS before receiving compilation output."
   (cond ((eq 'latex cavy-compile-target)
-          (cavy-compile-buffer-setup-latex process buffer))))
+         (cavy-compile-buffer-setup-latex process buffer))))
 
 (defun cavy-compile-buffer-setup-latex (process buffer)
   "Prepare a BUFFER to view PDFs generted by PROCESS."
@@ -128,11 +152,11 @@
   "Make a Cavy compilation process in buffer BUFFER."
   (make-process :name "cavy-process" :buffer buffer :command (cavy-compile-command)))
 
-(defun cavy-compile-program (buffer)
-  "Compile a program and return the object code.
+(defun cavy-compile-program (buffer program)
+  "Compile a PROGRAM and return the object code.
 The BUFFER argument is the buffer to write output to."
   (let ((process (cavy-compile-process buffer)))
-    (process-send-string process (buffer-string))
+    (process-send-string process program)
     (process-send-eof process)
     (accept-process-output process)
     (cavy-compile-buffer-setup process buffer)))
@@ -141,7 +165,7 @@ The BUFFER argument is the buffer to write output to."
   "Recompile and display output in a temporary buffer."
   (interactive)
   (with-output-to-temp-buffer cavy-preview-buffer
-    (cavy-compile-program cavy-preview-buffer)))
+    (cavy-compile-program cavy-preview-buffer (buffer-string))))
 
 (defun cavy-after-save-hook ()
   "Action to take after saving the cavy file."
@@ -150,6 +174,12 @@ The BUFFER argument is the buffer to write output to."
 ;;;;;;;;;;;;
 ;; Syntax ;;
 ;;;;;;;;;;;;
+
+(defcustom cavy-indent-offset 4
+  "Indent Cavy code by this many spaces."
+  :type 'integer
+  :group 'cavy
+  :safe #'integerp)
 
 ;; `define-derived-mode' will find this name automatically and use this table.
 (defvar cavy-mode-syntax-table nil
@@ -164,6 +194,7 @@ The BUFFER argument is the buffer to write output to."
 (defconst cavy-keywords
   '("if" "else" "for" "in"
     "as" "let" "fn" "print"
+    "struct" "enum" "type"
     "true" "false")
   "Cavy keywords for font-locking.")
 
@@ -173,27 +204,30 @@ The BUFFER argument is the buffer to write output to."
 
 (defconst cavy-builtins
   '("flip" "split"
-    "len" "enumerate"
+    "len" "enumerate" "zip"
     "qalloc" "free"))
+
+(defface cavy-special-operators-face
+  '((t :weight bold :inherit font-lock-builtin-face))
+  "Face for the linearization and of course operators."
+  :group 'cavy)
 
 (defvar cavy-font-lock-keywords
   `(
     (,(regexp-opt cavy-keywords 'symbols) . font-lock-keyword-face)
     (,(regexp-opt cavy-types 'symbols) . font-lock-type-face)
     (,(regexp-opt cavy-builtins 'symbols) . font-lock-builtin-face)
+    ("\\?" . 'cavy-special-operators-face)
+    ("\\!" . 'cavy-special-operators-face)
     )
   "Font-lock definitions.")
-
-; (defvar cavy-syntactic-face-function
-;   (lambda (state)
-;     (if (nth 3 state) font-lock-string-face font-lock-comment-face)))
 
 ;;;;;;;;;;;;;;;;;;;;;
 ;; Mode definition ;;
 ;;;;;;;;;;;;;;;;;;;;;
 
 ;;;###autoload
-(define-derived-mode cavy-mode fundamental-mode "Cavy"
+(define-derived-mode cavy-mode prog-mode "Cavy"
   "Major mode for editing Cavylang code."
 
   ;; Fontification
