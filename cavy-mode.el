@@ -42,6 +42,12 @@
   :group 'cavy
   :safe #'stringp)
 
+(defcustom cavy-tempdir 'nil
+  "Directory for temp files, e.g. for LaTeX compilation."
+  :type 'string
+  :group 'cavy
+  :safe #'stringp)
+
 (defcustom cavy-binary "cavyc"
   "Name of the Cavy binary to call."
   :type 'string
@@ -105,21 +111,26 @@
         
     `(,cavy-binary ,in "-o" ,out ,@opt ,@target ,@comptime ,@phase ,@dbg)))
 
+(defun cavy-make-or-get-tempdir ()
+  "Get the tempdir used for building latex documents."
+  (if (and cavy-tempdir (file-directory-p cavy-tempdir))
+      cavy-tempdir
+    (let ((tmp (make-temp-file "cavy" t)))
+      (setq cavy-tempdir tmp))))
+
 (defun cavy-build-pdf ()
   "Command to run when compiling to latex."
-  (let* ((out-dir "DIR")
+  (let* ((out-dir (cavy-make-or-get-tempdir))
          (tex-doc "cavy.tex")
          (pdf-doc "cavy.pdf")
          (shell-script
-          (concat out-dir "=`mktemp -d`; "
-                  ;; No latex file pollution, please!
-                  "cd $" out-dir "; "
+          (concat "cd " out-dir "; "
                   ;; Now make the .tex document
                   (mapconcat 'identity (cavy-cli-command 'nil tex-doc) " ") "; "
-                  ;; And compile it! Note that latexmk is very noisy, and we
+                  ;; And compile it! Note that pdflatex is very noisy, and we
                   ;; have to supress all its output in order for us to get a
                   ;; well-formed pdf out of this.
-                  "latexmk " tex-doc " -pdf > /dev/null 2>&1; "
+                  "pdflatex " tex-doc " -pdf > /dev/null 2>&1; "
                   ;; Emit the pdf, but supress error message if it's not there.
                   "cat " pdf-doc " 2> /dev/null")))
     `("bash" "-c" ,shell-script)))
@@ -177,15 +188,23 @@ The BUFFER argument is the buffer to write output to."
   "Action to take after saving the cavy file."
   (cavy-compile-and-preview))
 
-;;;;;;;;;;;;
-;; Syntax ;;
-;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;
+;; Indentation ;;
+;;;;;;;;;;;;;;;;;
 
 (defcustom cavy-indent-offset 4
-  "Indent Cavy code by this many spaces."
+  "TODO: indent Cavy code by this many spaces. This is currently unused!"
   :type 'integer
   :group 'cavy
   :safe #'integerp)
+
+(defun cavy-indent-line ()
+    "Indent a line of Cavy code."
+  (indent-line-relative))
+
+;;;;;;;;;;;;
+;; Syntax ;;
+;;;;;;;;;;;;
 
 ;; `define-derived-mode' will find this name automatically and use this table.
 (defvar cavy-mode-syntax-table nil
@@ -201,11 +220,11 @@ The BUFFER argument is the buffer to write output to."
   '("if" "else" "for" "in"
     "as" "let" "fn" "print"
     "struct" "enum" "type"
-    "true" "false")
+    "true" "false" "io")
   "Cavy keywords for font-locking.")
 
 (defconst cavy-types
-  '("bool" "u8" "u16" "u32")
+  '("bool" "u8" "u16" "u32" "Fn")
   "Cavy's built-in base types.")
 
 (defconst cavy-builtins
@@ -238,6 +257,9 @@ The BUFFER argument is the buffer to write output to."
 
   ;; Fontification
   (setq-local font-lock-defaults '((cavy-font-lock-keywords)))
+
+  ;; Indentation
+  (setq-local indent-line-function #'cavy-indent-line)
 
   ;; Preview compiled code
   (add-hook 'after-save-hook 'cavy-after-save-hook nil t))
