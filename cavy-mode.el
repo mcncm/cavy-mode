@@ -24,18 +24,6 @@
 ;; Compilation ;;
 ;;;;;;;;;;;;;;;;;
 
-(defcustom cavy-compile-target 'qasm
-  "What should be the output of the Cavy compiler?"
-  :type 'symbol
-  :group 'cavy
-  :safe #'symbolp)
-
-(defcustom cavy-latex-compile-method 'native
-  "What LaTeX backend should be used?"
-  :type 'symbol
-  :group 'cavy
-  :safe #'symbolp)
-
 (defcustom cavy-preview-buffer "cavy-preview"
   "Name of the buffer to write Cavy compile output to."
   :type 'string
@@ -54,62 +42,68 @@
   :group 'cavy
   :safe #'stringp)
 
-(defcustom cavy-opt-level 3
-  "Optimization level for Cavy compiler."
-  :type 'integer
-  :group 'cavy
-  :safe #'integerp)
+(defcustom cavy-options
+  '((opt-level    . 3)
+    (no-comptime  . nil)               ; no constant propagation
+    (phase        . nil)
+    (debug        . t)
 
-(defcustom cavy-comptime 't
-  "Do constant propagation optimization."
-  :type 'boolean
-  :group 'cavy
-  :safe #'booleanp)
-
-(defcustom cavy-phase 'nil
-  "Compilation phase to stop at. if NIL, proceed to code generation."
+    ;; target options
+    (target       . nil)
+    (standalone   . nil)               ; compile latex as standalone
+    (package      . nil)               ; latex package
+    (initial-kets . t))                ; use initial kets
+  "Options passed to the Cavy binary."
   :group 'cavy)
 
-(defcustom cavy-debug 't
-  "Run compiler in debug mode if not NIL."
-  :type 'boolean
-  :group 'cavy
-  :safe #'booleanp)
+(defun cavy-get-opt (key)
+  "Get the value of option `KEY'."
+  (cdr (assq key cavy-options)))
 
-(defcustom cavy-target 'nil
-  "Compile target for Cavy code."
-  :type 'string
-  :group 'cavy
-  :safe #'stringp)
+(defun cavy-flag (flag key)
+  "Get the value of option `FLAG' from `cavy-options' key `KEY'."
+  (let* ((value (cavy-get-opt key)))
+    (cond ((stringp value)
+           `(,flag ,value))
+          ((numberp value)
+           `(,flag ,(number-to-string value)))
+          ((eq value 't)
+           `(,flag))
+          ((not value)
+           'nil))))
 
-(defcustom cavy-options '()
-  "Options passed to the Cavy binary."
-  :type 'list
-  :group 'cavy
-  :safe #'listp)
+(defun cavy-set-opt (key value)
+  "Set the value of option `KEY' to value `VALUE'."
+  (interactive)
+  (setf (alist-get key cavy-options) value))
+
+;; How can this be done without a double-lookup?
+(defun cavy-toggle-opt (key)
+  "Toggle the value of option `KEY' between `t and nil."
+  (interactive)
+  "Toggle the value of option `KEY'."
+  (let* ((entry (alist-get key cavy-options))
+         (new-value (if entry 'nil 't)))
+    (setf (alist-get key cavy-options) new-value)))
 
 (defun cavy-cli-command (&optional in out)
-  "Generate the compilation command for the Cavy CLI."
-  (let ((target (if cavy-target
-                    `("--target" ,(symbol-name cavy-target))
-                  'nil))
-        (phase (if cavy-phase
-                   `("--phase" ,cavy-phase)
-                 'nil))
-        (opt (if cavy-opt-level
-                 `("-O" ,(number-to-string cavy-opt-level))
-               'nil))
-        (comptime (if cavy-comptime
-                      'nil
-                    '("--no-comptime")))
-        (dbg (if cavy-debug
-                 '("--debug")
-               'nil))
+  "Generate the compilation command for the Cavy CLI. Optionally takes input and output files `IN' and `OUT'."
+  (let ((target (cavy-flag "--target" 'target))
+        (package (cavy-flag "--package" 'package))
+        (standalone (cavy-flag "--standalone" 'standalone))
+        (kets (cavy-flag "--initial-kets" 'initial-kets))
+
+        (phase (cavy-flag "--phase" 'phase))
+        (opt (cavy-flag "-O" 'opt-level))
+        (comptime (cavy-flag "--no-comptime" 'no-comptime))
+        (dbg (cavy-flag "--debug" 'debug))
         ;; handle default values
         (in (or in "/dev/stdin"))
         (out (or out "/dev/stdout")))
         
-    `(,cavy-binary ,in "-o" ,out ,@opt ,@target ,@comptime ,@phase ,@dbg)))
+    `(,cavy-binary ,in "-o" ,out
+                   ,@opt ,@target ,@standalone ,@package ,@kets
+                   ,@comptime ,@phase ,@dbg)))
 
 (defun cavy-make-or-get-tempdir ()
   "Get the tempdir used for building latex documents."
@@ -137,13 +131,13 @@
 
 (defun cavy-compile-command ()
   "Command to ready BUFFER used by PROCESS before receiving compilation output."
-  (if (eq cavy-target 'latex_standalone)
+  (if (cavy-get-opt 'standalone)
       (cavy-build-pdf)
-    (cavy-cli-command)))
+      (cavy-cli-command)))
       
 (defun cavy-compile-buffer-setup (process buffer)
   "Command to ready BUFFER used by PROCESS before receiving compilation output."
-  (cond ((eq cavy-target 'latex_standalone)
+  (cond ((cavy-get-opt 'standalone)
          (cavy-compile-buffer-setup-latex process buffer))))
 
 (defun cavy-compile-buffer-setup-latex (process buffer)
@@ -217,10 +211,10 @@ The BUFFER argument is the buffer to write output to."
         syn-table))
 
 (defconst cavy-keywords
-  '("if" "else" "for" "in"
-    "as" "let" "fn" "print"
-    "struct" "enum" "type"
-    "true" "false" "io")
+  '("if" "else" "for" "in" "match"
+    "with" "as" "let" "fn" "impl"
+    "mut" "struct" "enum" "type"
+    "true" "false" "io" "assert")
   "Cavy keywords for font-locking.")
 
 (defconst cavy-types
@@ -242,6 +236,7 @@ The BUFFER argument is the buffer to write output to."
     (,(regexp-opt cavy-keywords 'symbols) . font-lock-keyword-face)
     (,(regexp-opt cavy-types 'symbols) . font-lock-type-face)
     (,(regexp-opt cavy-builtins 'symbols) . font-lock-builtin-face)
+    (,(regexp-opt '("unsafe") 'symbols) . font-lock-warning-face)
     ("\\?" . 'cavy-special-operators-face)
     ("\\!" . 'cavy-special-operators-face))
     
