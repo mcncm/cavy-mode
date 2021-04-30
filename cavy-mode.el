@@ -44,15 +44,16 @@
 
 (defcustom cavy-options
   '((opt-level    . 3)
-    (no-comptime  . nil)               ; no constant propagation
+    (no-comptime  . nil)                ; no constant propagation
     (phase        . nil)
     (debug        . t)
 
     ;; target options
     (target       . nil)
-    (standalone   . nil)               ; compile latex as standalone
-    (package      . nil)               ; latex package
-    (initial-kets . t))                ; use initial kets
+    (standalone   . nil)                ; compile latex as standalone
+    (package      . nil)                ; latex package
+    (initial-kets . t)                  ; use initial kets
+    (perf         . t))                 ; report profiling statistics
   "Options passed to the Cavy binary."
   :group 'cavy)
 
@@ -92,6 +93,7 @@
         (package (cavy-flag "--package" 'package))
         (standalone (cavy-flag "--standalone" 'standalone))
         (kets (cavy-flag "--initial-kets" 'initial-kets))
+        (perf (cavy-flag "--perf" 'perf))
 
         (phase (cavy-flag "--phase" 'phase))
         (opt (cavy-flag "-O" 'opt-level))
@@ -103,7 +105,7 @@
         
     `(,cavy-binary ,in "-o" ,out
                    ,@opt ,@target ,@standalone ,@package ,@kets
-                   ,@comptime ,@phase ,@dbg)))
+                   ,@perf ,@comptime ,@phase ,@dbg)))
 
 (defun cavy-make-or-get-tempdir ()
   "Get the tempdir used for building latex documents."
@@ -129,15 +131,21 @@
                   "cat " pdf-doc " 2> /dev/null")))
     `("bash" "-c" ,shell-script)))
 
+(defun cavy-pdf-preview-p ()
+  "Do the current option settings create a .pdf?"
+  (and (cavy-get-opt 'standalone)
+       (string= (cavy-get-opt 'target) "latex")))
+  
+
 (defun cavy-compile-command ()
   "Command to ready BUFFER used by PROCESS before receiving compilation output."
-  (if (cavy-get-opt 'standalone)
+  (if  (cavy-pdf-preview-p)
       (cavy-build-pdf)
-      (cavy-cli-command)))
+    (cavy-cli-command)))
       
 (defun cavy-compile-buffer-setup (process buffer)
   "Command to ready BUFFER used by PROCESS before receiving compilation output."
-  (cond ((cavy-get-opt 'standalone)
+  (cond ((cavy-pdf-preview-p)
          (cavy-compile-buffer-setup-latex process buffer))))
 
 (defun cavy-compile-buffer-setup-latex (process buffer)
@@ -214,7 +222,8 @@ The BUFFER argument is the buffer to write output to."
   '("if" "else" "for" "in" "match"
     "with" "as" "let" "fn" "impl"
     "mut" "struct" "enum" "type"
-    "true" "false" "io" "assert")
+    "true" "false" "io" "assert"
+    "drop")
   "Cavy keywords for font-locking.")
 
 (defconst cavy-types
