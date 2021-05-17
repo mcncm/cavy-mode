@@ -47,14 +47,20 @@
     (no-comptime  . nil)                ; no constant propagation
     (phase        . nil)
     (debug        . t)
+    (feedback     . t)
 
     ;; target options
     (target       . nil)
     (standalone   . nil)                ; compile latex as standalone
-    (package      . nil)                ; latex package
+    (package      . quantikz)           ; latex package
+    (wave         . nil)                ; quantikz wave
     (initial-kets . t)                  ; use initial kets
-    (perf         . t))                 ; report profiling statistics
-  "Options passed to the Cavy binary."
+    (perf         . t)                  ; report profiling statistics
+
+    ;; measurement options
+    (meas-mode    . demolition))
+
+  "Options passed to the Cavy command line interface."
   :group 'cavy)
 
 (defun cavy-get-opt (key)
@@ -93,19 +99,23 @@
         (package (cavy-flag "--package" 'package))
         (standalone (cavy-flag "--standalone" 'standalone))
         (kets (cavy-flag "--initial-kets" 'initial-kets))
+        (wave (cavy-flag "--wave" 'wave))
         (perf (cavy-flag "--perf" 'perf))
 
         (phase (cavy-flag "--phase" 'phase))
         (opt (cavy-flag "-O" 'opt-level))
         (comptime (cavy-flag "--no-comptime" 'no-comptime))
         (dbg (cavy-flag "--debug" 'debug))
+        (feedback (cavy-flag "--feedback" 'feedback))
+        (meas-mode (cavy-flag "--meas-mode" 'meas-mode))
         ;; handle default values
         (in (or in "/dev/stdin"))
         (out (or out "/dev/stdout")))
         
     `(,cavy-binary ,in "-o" ,out
                    ,@opt ,@target ,@standalone ,@package ,@kets
-                   ,@perf ,@comptime ,@phase ,@dbg)))
+                   ,@perf ,@comptime ,@phase ,@dbg ,@feedback
+                   ,@meas-mode ,@wave)))
 
 (defun cavy-make-or-get-tempdir ()
   "Get the tempdir used for building latex documents."
@@ -134,8 +144,10 @@
 (defun cavy-pdf-preview-p ()
   "Do the current option settings create a .pdf?"
   (and (cavy-get-opt 'standalone)
+       (let ((phase (cavy-get-opt 'phase)))
+         (or (eq phase nil)
+             (eq phase 'compile)))
        (string= (cavy-get-opt 'target) "latex")))
-  
 
 (defun cavy-compile-command ()
   "Command to ready BUFFER used by PROCESS before receiving compilation output."
